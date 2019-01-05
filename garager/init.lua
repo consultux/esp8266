@@ -102,8 +102,8 @@ status=1
 print("config wifi")
 wifi.setmode(wifi.STATION)
 local cfg ={};
-cfg.ssid="middletux";
-cfg.pwd="HidjTdihs2013";
+cfg.ssid="DELETED";
+cfg.pwd="DELETED";
 cfg.save=true;
 wifi.sta.config(cfg)
 cfg = nil
