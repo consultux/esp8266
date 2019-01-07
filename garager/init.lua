@@ -6,14 +6,16 @@ INIT=5
 CAN_DISTANCE=6
 CAN_TEMP=7
 -- FIXME: read timers and other config from config file
-WATCHDOG=660000
+WATCHDOG=100
+WD_ALLGOOD=660
+RTC=32
 
 --FIXME1: when to store status in rtcmem.write and load as prior last status
 
 --FIXME2: improve log handling: ability to suppress debug
 
 status=0
-dog=tmr.softwd(WATCHDOG)
+tmr.softwd(WATCHDOG)
 
 topic,_=string.gsub(wifi.sta.getmac(), ":","")
 _ = nil
@@ -24,38 +26,45 @@ srv=net.createServer(net.TCP)
 
 tsensor=nil
 sensor={}
+sensor.prior_status = rtcmem.read32(RTC)
 
 function init_finished()
     status=bit.set(status, INIT)
     startup = nil
+    update_sensor()
     dofile("garager.lua")
 end
 
 function update_sensor()
-    sensor.memtot, sensor.memused = node.egc.meminfo()
+    rtcmem.write32(RTC, status)
+    sensor.mtot, sensor.mused = node.egc.meminfo()
     sensor.heap = node.heap()
+    sensor.wifi = wifi.sta.status()
+    if sensor.wifi ~= wifi.STA_GOTIP then
+        status = bit.clear(status, WIFI)
+        log("wifi connection lost")
+    end
     sensor.status = status
     local str=""
     if lstack[1] then
         str = lstack[1]
     end
-    sensor.lastlog = str
+    sensor.log = str
 end
 
 function log(str)
     table.insert(lstack, str)
     print(str)
-    --FIXME2: error handling here?
     local function send_log()
         update_sensor()
-        mq:publish(topic.."/log", sjson.encode(sensor),0,0, function(client)
+        if mq:publish(topic.."/log", sjson.encode(sensor),0,0) then
             status=bit.set(status, CAN_PUBLISH)
             table.remove(lstack, 1)            
             -- try to send other pending log messages
             if #lstack > 0 then
                 send_log()
             end
-        end)
+        end
     end
     pcall(send_log)
 end
@@ -70,6 +79,7 @@ function startup()
         end
         tmr.alarm(0,200,0, startup)
     else
+        log("wifi connected: "..wifi.sta.getip())
         if pcall(init_temp) then
             print("loaded ds18b20 module")
             status=bit.set(status, CAN_TEMP)
@@ -113,27 +123,29 @@ end
 
 function mqtt_connect()
     print("connecting to MQTT")
-    if pcall(mq:connect("192.168.1.31", 1883, 0, 0, function(conn)
+    local ret, err = pcall(mq:connect("192.168.1.31", 1883, 0, 0, function(conn)
         log("connected to mqtt")
-        print ("Connected to MQTT")
         mq:publish(topic.."/available", "online",1,0)
         conn:subscribe(topic.."/command", 0, function(client) 
             log("subscribe success") 
         end)
         status=bit.set(status, MQTT)
-        dog=tmr.softwd(WATCHDOG)
+        tmr.softwd(WATCHDOG)
         if not bit.isset(status, INIT) then
             init_finished()
         end
-    end)) then
-        log ("unexpected mqtt error, trying again in 5 sec")
-        tmr.alarm(0,5000,0,mqtt_connect)
+    end))
+    if ret then
+        if not err then err="" end
+        log ("unexpected mqtt error ("..err..", trying again in 3 sec")
+        tmr.alarm(0,3000,0,mqtt_connect)
     end
 end
 
 mq:on("offline", function(client) 
     --print ("MQTToffline")
     status=bit.clear(status, MQTT) 
+    tmr.softwd(WATCHDOG)
     log("reconnecting mqtt")
     tmr.alarm(0,1000,0,mqtt_connect)
 end)

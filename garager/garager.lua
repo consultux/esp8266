@@ -13,8 +13,8 @@ DOOR_TRESHOLD=40
 
 sensor.temp=0
 sensor.door=-1
-sensor.dist=0
-sensor.door_status=0
+dist=0
+door_status=0
 
 start=0
 done=0
@@ -83,7 +83,7 @@ function echo_cb(level, when)
         gpio.trig(ECHO, "down")
     else
         --print("callback down", level, when)
-        sensor.dist = (when-start) / 58
+        dist = (when-start) / 58
     end
 end
 
@@ -98,29 +98,29 @@ end
 
 function distance()
     local reading
-    if sensor.dist <= 0 then 
+    if dist <= 0 then 
         reading = -1
         status=bit.clear(status, CAN_DISTANCE)
-    elseif sensor.dist < DOOR_TRESHOLD then
+    elseif dist < DOOR_TRESHOLD then
         reading = 1
         status=bit.set(status, CAN_DISTANCE)
     else
         reading =0
         status=bit.set(status, CAN_DISTANCE)
     end
-    if sensor.door_status > 0 then
+    if door_status > 0 then
         -- this is a second read after a change in status
         --print("read distance after change in status, now "..reading)
-        sensor.door_status = bit.set(sensor.door_status, reading + 4)
-        if (sensor.door_status % 9) == 0 then
+        door_status = bit.set(door_status, reading + 4)
+        if (door_status % 9) == 0 then
             --print("change in status detected, now "..reading)
             sensor.door = reading
             tmr.alarm(1,20,0,report_change)
         end
-        sensor.door_status = 0
+        door_status = 0
     elseif reading ~= sensor.door then
         -- this is a first discovery of a status change
-        sensor.door_status = bit.set(sensor.door_status, reading + 1)
+        door_status = bit.set(door_status, reading + 1)
         --print("possible status change detected, reading again to be sure "..reading)
     end
 end
@@ -149,13 +149,15 @@ end
 
 function mqtt_publish()
     update_sensor()
-    if not pcall(function() mq:publish(topic.."/status", sjson.encode(sensor),1,0, function(client)
-            print("data sent via mqtt")
-            status = bit.set(status, CAN_PUBLISH)
-            dog=tmr.softwd(WATCHDOG)
-        end)
-    end) then
+    local msg = sjson.encode(sensor)
+    if mq:publish(topic.."/status", msg,1,0) then
+        print("data sent via mqtt")
+        status = bit.set(status, CAN_PUBLISH)
+        tmr.softwd(WD_ALLGOOD)
+    else
         status = bit.clear(status, CAN_PUBLISH)
+        -- disabled. could add time to running wd from mqtt:offline
+        --tmr.softwd(WATCHDOG)
         log("mqtt_publish failed")
     end
 end
