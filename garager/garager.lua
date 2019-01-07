@@ -176,5 +176,5 @@ if bit.isset(status, CAN_TEMP) then
     tmr.alarm(3,5031,1,readTemp2)
 end
 tmr.alarm(5,2052,1,measure_distance)
-tmr.alarm(2,180000,1,mqtt_publish)
+tmr.alarm(2,300000,1,mqtt_publish)
  

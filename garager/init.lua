@@ -6,7 +6,7 @@ INIT=5
 CAN_DISTANCE=6
 CAN_TEMP=7
 -- FIXME: read timers and other config from config file
-WATCHDOG=300000
+WATCHDOG=660000
 
 --FIXME1: when to store status in rtcmem.write and load as prior last status
 
@@ -45,18 +45,19 @@ end
 function log(str)
     table.insert(lstack, str)
     print(str)
-    update_sensor()
     --FIXME2: error handling here?
     local function send_log()
+        update_sensor()
         mq:publish(topic.."/log", sjson.encode(sensor),0,0, function(client)
             status=bit.set(status, CAN_PUBLISH)
             table.remove(lstack, 1)            
+            -- try to send other pending log messages
+            if #lstack > 0 then
+                send_log()
+            end
         end)
     end
-        -- try to send other pending log messages
-    if #lstack > 0 then
-        send_log()
-    end
+    pcall(send_log)
 end
 
 function startup()
@@ -113,7 +114,7 @@ end
 function mqtt_connect()
     print("connecting to MQTT")
     if pcall(mq:connect("192.168.1.31", 1883, 0, 0, function(conn)
-        log(lastmsg)
+        log("connected to mqtt")
         print ("Connected to MQTT")
         mq:publish(topic.."/available", "online",1,0)
         conn:subscribe(topic.."/command", 0, function(client) 
